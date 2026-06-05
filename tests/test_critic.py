@@ -77,8 +77,8 @@ class TestCriticScoring(unittest.TestCase):
                     confidence=0.1, source_ids=["s1"], metadata={"drunk_level": 0.0})
         result = self.critic.evaluate(atom)
         self.assertTrue(
-            any("Duplicate" in r for r in result["reasons"]),
-            msg=f"Expected duplicate reason, got: {result['reasons']}",
+            any("Duplicate" in r or "identical" in r for r in result["reasons"]),
+            msg=f"Expected duplicate/identical reason, got: {result['reasons']}",
         )
 
     def test_missing_source_ids_loses_point(self) -> None:

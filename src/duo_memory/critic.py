@@ -1,12 +1,13 @@
-"""
-critic.py — Critic gate with 6-dimensional validation.
+"""critic.py — Critic gate with 6-dimensional validation.
 
 Evaluates chaos-generated atoms against a set of quality criteria.
-Filters out nonsense, empty talk, duplicates, and ungrounded claims.
+Filters out nonsense, empty talk, duplicates (exact + near-dupe),
+and ungrounded claims.
 """
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Dict, List, Optional, TYPE_CHECKING
 
@@ -34,7 +35,7 @@ EMPTY_PATTERNS: List[str] = [
 ]
 
 INSIGHT_SIGNALS: List[str] = [
-    "本质上", "本质上",  # same word in list for weight
+    "本质上",
     "就像", "模式", "类比", "反过来",
     "实际上是", "其本质是",
     "analogy", "essentially", "fundamentally",
@@ -42,6 +43,75 @@ INSIGHT_SIGNALS: List[str] = [
     "parallel", "resonates", "mirrors",
     "emerges", "underlying", "architecture",
 ]
+
+NEAR_DUPE_THRESHOLD = 0.85  # TF-IDF cosine similarity above this = near-duplicate
+
+
+# ---------------------------------------------------------------------------
+# TF-IDF helpers (pure Python, no deps)
+# ---------------------------------------------------------------------------
+
+def _tokenise(text: str) -> List[str]:
+    """Split text into lowercase tokens on non-word characters."""
+    return [t.lower() for t in re.split(r"\W+", text) if t]
+
+
+def _tfidf_cosine_similarity(a_text: str, b_texts: List[str]) -> float:
+    """Max TF-IDF cosine similarity between *a_text* and any text in *b_texts*.
+
+    Pure Python, builds vocabulary on the fly from all input texts.
+    Returns 0.0 if no valid comparison can be made.
+    """
+    all_texts = [a_text] + list(b_texts) if b_texts else [a_text]
+    all_tokens = [_tokenise(t) for t in all_texts]
+
+    # Build vocabulary
+    vocab: Dict[str, int] = {}
+    for tokens in all_tokens:
+        for t in tokens:
+            if t not in vocab:
+                vocab[t] = len(vocab)
+
+    if not vocab:
+        return 0.0
+
+    n_docs = len(all_tokens)
+    # IDF
+    idf: Dict[str, float] = {}
+    for term in vocab:
+        df = sum(1 for tokens in all_tokens if term in tokens)
+        idf[term] = math.log((n_docs + 1) / (df + 1)) + 1.0
+
+    # TF-IDF vectors
+    vecs = []
+    for tokens in all_tokens:
+        vec = [0.0] * len(vocab)
+        for t in tokens:
+            if t in vocab:
+                vec[vocab[t]] += 1.0  # TF
+        # Apply IDF
+        for term, idx in vocab.items():
+            if vec[idx] > 0:
+                vec[idx] *= idf[term]
+        vecs.append(vec)
+
+    # L2 normalize
+    norms = []
+    for vec in vecs:
+        norm = math.sqrt(sum(v * v for v in vec))
+        norms.append(norm if norm > 0 else 1.0)
+
+    # Cosine similarity between first vector (a_text) and rest
+    a_vec = vecs[0]
+    a_norm = norms[0]
+
+    max_sim = 0.0
+    for i in range(1, len(vecs)):
+        dot = sum(a_vec[j] * vecs[i][j] for j in range(len(vocab)))
+        sim = dot / (a_norm * norms[i])
+        max_sim = max(max_sim, sim)
+
+    return max_sim
 
 
 # ---------------------------------------------------------------------------
@@ -92,16 +162,29 @@ class Critic:
         else:
             reasons.append(f"Content too short ({len(atom.content)} chars < 10)")
 
-        # --- Dimension 2: Not a duplicate of any pool atom ---
-        is_dup = False
+        # --- Dimension 2: Not a duplicate (exact or near) of any pool atom ---
+        exact_dup = False
+        near_dup_score = 0.0
+        pool_contents = [a.content for a in self.pool if a.id not in atom.source_ids]
+
         for existing in self.pool:
-            if existing.content == atom.content:
-                is_dup = True
+            if existing.id not in atom.source_ids and existing.content == atom.content:
+                exact_dup = True
                 break
-        if not is_dup:
-            score += 1.0
-        else:
+
+        if exact_dup:
             reasons.append("Duplicate content — identical to an existing atom")
+        else:
+            # Near-duplicate check via TF-IDF cosine similarity
+            if pool_contents:
+                near_dup_score = _tfidf_cosine_similarity(atom.content, pool_contents)
+            if near_dup_score >= NEAR_DUPE_THRESHOLD:
+                score += 0.5
+                reasons.append(
+                    f"Near-duplicate (TF-IDF sim={near_dup_score:.2f} >= {NEAR_DUPE_THRESHOLD})"
+                )
+            else:
+                score += 1.0
 
         # --- Dimension 3: All source_ids exist in pool ---
         all_sources_exist = True
