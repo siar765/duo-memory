@@ -44,7 +44,7 @@ INSIGHT_SIGNALS: List[str] = [
     "emerges", "underlying", "architecture",
 ]
 
-NEAR_DUPE_THRESHOLD = 0.85  # TF-IDF cosine similarity above this = near-duplicate
+NEAR_DUPE_THRESHOLD = 0.7  # TF-IDF cosine similarity above this = near-duplicate
 
 
 # ---------------------------------------------------------------------------
