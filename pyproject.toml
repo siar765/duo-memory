@@ -9,10 +9,8 @@ description = "Dual-pool memory system: clean facts + chaotic insights, filtered
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-authors = [
-    {name = "Your Name", email = "you@example.com"},
-]
-keywords = ["memory", "ai", "agents", "creativity", "chaos"]
+authors = [{name = "Duo-Memory Contributors"}]
+keywords = ["memory", "ai", "agents", "creativity", "insight", "chaos"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -24,8 +22,8 @@ classifiers = [
 ]
 
 [project.urls]
-homepage = "https://github.com/yourname/duo-memory"
-repository = "https://github.com/yourname/duo-memory"
+homepage = "https://github.com/siar765/duo-memory"
+repository = "https://github.com/siar765/duo-memory"
 
 [project.scripts]
 duo-memory = "duo_memory.cli:main"

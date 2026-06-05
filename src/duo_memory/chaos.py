@@ -375,6 +375,8 @@ class ChaosEngine:
         if pool_size < 2:
             return results
 
+        seen_hashes: set = set()
+
         for _ in range(batch):
             level = self.get_drunkenness_level()
             op_name = self.pick_operation(level)
@@ -383,7 +385,7 @@ class ChaosEngine:
 
             # Operations needing 1 atom
             if op_name in ("sober_rephrase", "polar_shift", "semantic_drift"):
-                a = self.pool.random(1)
+                a = self.pool.weighted_random(1)
                 if not a:
                     continue
                 if op_name == "sober_rephrase":
@@ -395,7 +397,7 @@ class ChaosEngine:
 
             # Operations needing 2 atoms
             elif op_name in ("analogical_bridge", "category_blend", "extreme_analogy"):
-                pair = self.pool.random(2)
+                pair = self.pool.weighted_random(2)
                 if len(pair) < 2:
                     continue
                 if op_name == "analogical_bridge":
@@ -406,13 +408,19 @@ class ChaosEngine:
                     atom = self.extreme_analogy(pair[0], pair[1])
 
             elif op_name == "cross_domain_transfer":
-                pair = self.pool.random(2)
+                pair = self.pool.weighted_random(2)
                 if len(pair) < 2:
                     continue
                 atom = self.cross_domain_transfer(pair[0], pair[1], self.pool)
 
             if atom is not None:
-                results.append(atom)
+                # Fix drunk_level to match the level that determined the operation
+                atom.metadata["drunk_level"] = round(level, 4)
+                # Batch dedup: skip content already seen this round
+                content_hash = hash(atom.content)
+                if content_hash not in seen_hashes:
+                    seen_hashes.add(content_hash)
+                    results.append(atom)
 
         return results
 
@@ -423,6 +431,7 @@ class ChaosEngine:
         content: str,
         sources: List[str],
         op_name: str,
+        drunk_level: float = 0.0,
     ) -> "Atom":
         """Create a chaos-generated insight atom with proper metadata."""
         from .core import Atom, generate_id
@@ -436,6 +445,6 @@ class ChaosEngine:
             source_ids=sources,
             metadata={
                 "chaos_op": op_name,
-                "drunk_level": round(self.get_drunkenness_level(), 4),
+                "drunk_level": round(drunk_level, 4),
             },
         )

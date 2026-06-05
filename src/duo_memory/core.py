@@ -215,6 +215,24 @@ class Pool:
             return []
         return random.sample(list(self._atoms.values()), min(n, len(self._atoms)))
 
+    def weighted_random(self, n: int) -> List[Atom]:
+        """Random sample weighted by confidence — high-confidence atoms more likely."""
+        atoms = list(self._atoms.values())
+        if n <= 0 or not atoms:
+            return []
+        weights = [max(a.confidence, 0.01) for a in atoms]
+        chosen = random.choices(atoms, weights=weights, k=min(n, len(atoms)))
+        # Deduplicate while preserving weighting intent
+        seen: set = set()
+        result: list = []
+        for a in chosen:
+            if a.id not in seen:
+                seen.add(a.id)
+                result.append(a)
+                if len(result) == n:
+                    break
+        return result or atoms[:min(n, len(atoms))]
+
     def by_type(self, atom_type: str) -> List[Atom]:
         """Return all atoms of the given type."""
         _validate_atom_type(atom_type)
