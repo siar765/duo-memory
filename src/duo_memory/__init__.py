@@ -5,4 +5,4 @@ from .chaos import ChaosEngine
 from .critic import Critic
 
 __all__ = ["Atom", "Pool", "generate_id", "ChaosEngine", "Critic"]
-__version__ = "0.1.0"
+__version__ = "0.1.4"

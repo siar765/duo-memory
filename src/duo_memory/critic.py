@@ -34,15 +34,89 @@ EMPTY_PATTERNS: List[str] = [
     r"\b(interesting|noteworthy|important)\s+(point|thing|aspect|observation)\b",
 ]
 
-INSIGHT_SIGNALS: List[str] = [
+# Chinese insight signals first, then English signals.
+# Dedup guard via sorted(set(...)) — no actual duplicates expected.
+_RAW_INSIGHT_SIGNALS: List[str] = [
+    # Chinese signals
     "本质上",
     "就像", "模式", "类比", "反过来",
     "实际上是", "其本质是",
+    # English signals
     "analogy", "essentially", "fundamentally",
     "pattern", "mechanism", "structure",
     "parallel", "resonates", "mirrors",
     "emerges", "underlying", "architecture",
 ]
+INSIGHT_SIGNALS: List[str] = sorted(set(_RAW_INSIGHT_SIGNALS))
+
+NEAR_DUPE_THRESHOLD = 0.7  # Default; instance-level threshold may override
+
+
+# ---------------------------------------------------------------------------
+# TF-IDF helpers (pure Python, no deps)
+# ---------------------------------------------------------------------------
+
+def _tokenise(text: str) -> List[str]:
+    """Split text into lowercase tokens on non-word characters."""
+    return [t.lower() for t in re.split(r"\W+", text) if t]
+
+
+def _tfidf_cosine_similarity(a_text: str, b_texts: List[str]) -> float:
+    """Max TF-IDF cosine similarity between *a_text* and any text in *b_texts*.
+
+    Pure Python, builds vocabulary on the fly from all input texts.
+    Returns 0.0 if no valid comparison can be made.
+    """
+    all_texts = [a_text] + list(b_texts) if b_texts else [a_text]
+    all_tokens = [_tokenise(t) for t in all_texts]
+
+    # Build vocabulary
+    vocab: Dict[str, int] = {}
+    for tokens in all_tokens:
+        for t in tokens:
+            if t not in vocab:
+                vocab[t] = len(vocab)
+
+    if not vocab:
+        return 0.0
+
+    n_docs = len(all_tokens)
+    # IDF
+    idf: Dict[str, float] = {}
+    for term in vocab:
+        df = sum(1 for tokens in all_tokens if term in tokens)
+        idf[term] = math.log((n_docs + 1) / (df + 1)) + 1.0
+
+    # TF-IDF vectors
+    vecs = []
+    for tokens in all_tokens:
+        vec = [0.0] * len(vocab)
+        for t in tokens:
+            if t in vocab:
+                vec[vocab[t]] += 1.0  # TF
+        # Apply IDF
+        for term, idx in vocab.items():
+            if vec[idx] > 0:
+                vec[idx] *= idf[term]
+        vecs.append(vec)
+
+    # L2 normalize
+    norms = []
+    for vec in vecs:
+        norm = math.sqrt(sum(v * v for v in vec))
+        norms.append(norm if norm > 0 else 1.0)
+
+    # Cosine similarity between first vector (a_text) and rest
+    a_vec = vecs[0]
+    a_norm = norms[0]
+
+    max_sim = 0.0
+    for i in range(1, len(vecs)):
+        dot = sum(a_vec[j] * vecs[i][j] for j in range(len(vocab)))
+        sim = dot / (a_norm * norms[i])
+        max_sim = max(max_sim, sim)
+
+    return max_sim
 
 NEAR_DUPE_THRESHOLD = 0.7  # TF-IDF cosine similarity above this = near-duplicate
 
@@ -121,8 +195,18 @@ def _tfidf_cosine_similarity(a_text: str, b_texts: List[str]) -> float:
 class Critic:
     """Validates atoms against quality criteria and filters out low-quality ones."""
 
-    def __init__(self, pool: "Pool") -> None:
+    def __init__(self, pool: "Pool", mode: str = "normal") -> None:
         self.pool = pool
+        self.mode = mode
+        if mode == "strict":
+            self.pass_threshold = 5.0
+            self.near_dupe_threshold = 0.6
+        elif mode == "lenient":
+            self.pass_threshold = 3.0
+            self.near_dupe_threshold = 0.8
+        else:  # normal (default)
+            self.pass_threshold = 4.0
+            self.near_dupe_threshold = 0.7
         self._nonsense_re = [re.compile(p, re.IGNORECASE) for p in NONSENSE_PATTERNS]
         self._empty_re = [re.compile(p, re.IGNORECASE) for p in EMPTY_PATTERNS]
 
@@ -178,10 +262,10 @@ class Critic:
             # Near-duplicate check via TF-IDF cosine similarity
             if pool_contents:
                 near_dup_score = _tfidf_cosine_similarity(atom.content, pool_contents)
-            if near_dup_score >= NEAR_DUPE_THRESHOLD:
+            if near_dup_score >= self.near_dupe_threshold:
                 score += 0.5
                 reasons.append(
-                    f"Near-duplicate (TF-IDF sim={near_dup_score:.2f} >= {NEAR_DUPE_THRESHOLD})"
+                    f"Near-duplicate (TF-IDF sim={near_dup_score:.2f} >= {self.near_dupe_threshold})"
                 )
             else:
                 score += 1.0
@@ -237,7 +321,7 @@ class Critic:
                 f"Drunk level ({drunk_level:.2f}) >= 0.6 but score ({score:.1f}) < 3"
             )
 
-        valid = score >= 4.0
+        valid = score >= self.pass_threshold
 
         return {
             "valid": valid,
@@ -255,12 +339,20 @@ class Critic:
         self,
         atoms: List["Atom"],
         results: Optional[List[Dict]] = None,
+        mode: Optional[str] = None,
     ) -> List["Atom"]:
         """Return only atoms that passed evaluation.
 
         If *results* is None, atoms are evaluated first. Otherwise
         atoms and results are zipped by index.
+
+        If *mode* is provided, creates a new Critic with that mode
+        for evaluation (only used when results is None).
         """
         if results is None:
-            results = self.batch_evaluate(atoms)
+            if mode is not None and mode != self.mode:
+                critic = Critic(self.pool, mode=mode)
+                results = critic.batch_evaluate(atoms)
+            else:
+                results = self.batch_evaluate(atoms)
         return [a for a, r in zip(atoms, results) if r.get("valid", False)]

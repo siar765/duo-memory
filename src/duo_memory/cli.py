@@ -85,14 +85,18 @@ def _append_feedback(entry: Dict) -> None:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Generate chaos atoms, run critic, show results, save valid ones."""
-    pool = _load_main_pool()
+    if args.agent_pool:
+        pool = Pool.load_from_agent_memory(args.agent_pool)
+        print(f"Loaded {len(pool)} atom(s) from agent-memory pool (read-only).")
+    else:
+        pool = _load_main_pool()
     if len(pool) < 2:
         print("Need at least 2 atoms in pool to run chaos generation.", file=sys.stderr)
         print(f"Pool has {len(pool)} atom(s).", file=sys.stderr)
         return 1
 
     engine = ChaosEngine(pool)
-    critic = Critic(pool)
+    critic = Critic(pool, mode=args.mode)
 
     batch = max(1, args.batch)
     generated = engine.generate(batch=batch)
@@ -269,6 +273,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument(
         "--batch", type=int, default=5,
         help="Number of chaos atoms to generate (default: 5)",
+    )
+    p_run.add_argument(
+        "--agent-pool", type=str, default=None,
+        help="Path to agent-memory atoms directory (read-only; overrides default pool)",
+    )
+    p_run.add_argument(
+        "--mode", type=str, choices=["strict", "normal", "lenient"], default="normal",
+        help="Critic gate mode: strict (5.0), normal (4.0, default), lenient (3.0)",
     )
 
     # stats

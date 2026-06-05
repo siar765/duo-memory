@@ -111,7 +111,7 @@ Operation selection is driven by a Beta(0.5, 0.5) distribution — it naturally 
 
 ### The Critic Gate (6 Dimensions)
 
-Every chaos output is scored on 6 dimensions. Must score ≥ 3 to pass:
+Every chaos output is scored on 6 dimensions. Must score ≥ 4 to pass:
 
 1. **Not nonsense** — no 1+1=789, no absolute statements (instant reject)
 2. **Not empty** — no 套话/formulaic talk (instant reject)

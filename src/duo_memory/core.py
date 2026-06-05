@@ -277,6 +277,36 @@ class Pool:
                     atoms.append(Atom.from_dict(json.loads(line)))
         return cls(atoms)
 
+    @classmethod
+    def load_from_agent_memory(cls, path: str) -> "Pool":
+        """Load atoms from an agent-memory atoms directory.
+
+        Merges all *.jsonl files found in *path* and tags each atom's
+        metadata with ``source_repo="agent-memory"``.
+
+        Args:
+            path: Directory path containing *.jsonl atom files.
+
+        Returns:
+            A new Pool with all loaded atoms.
+        """
+        pool = cls()
+        if not os.path.isdir(path):
+            return pool
+        for fname in sorted(os.listdir(path)):
+            if fname.endswith(".jsonl"):
+                fpath = os.path.join(path, fname)
+                try:
+                    chunk = cls.from_jsonl(fpath)
+                    for atom in chunk:
+                        if not isinstance(atom.metadata, dict):
+                            atom.metadata = {}
+                        atom.metadata["source_repo"] = "agent-memory"
+                    pool.add_many(list(chunk))
+                except Exception:
+                    continue  # skip corrupt files
+        return pool
+
     # ---- Dunder ----------------------------------------------------------
 
     def __len__(self) -> int:
